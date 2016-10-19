@@ -1,0 +1,18 @@
+<configuration>
+	<property>
+		<name>partition_column</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>partition_column_select</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>where_column</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>partition_clause</name>
+		<value>   </value>
+	</property>
+</configuration>
