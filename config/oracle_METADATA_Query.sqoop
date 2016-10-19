@@ -1,0 +1,11 @@
+select 
+       table_name as TableName, column_name as ColumnName,
+       data_length as ColumnLength,data_type as ColumnType,
+       data_precision as DecimalTotalDigits, data_scale as DecimalFractionalDigits,
+       a.column_id as ColumnId,
+       a.nullable
+from   sys.all_tab_columns a
+where  table_name in ( ${tableNamesToken})
+and    owner = '${databaseNameToken}'
+and    \$CONDITIONS
+order  by TableName,ColumnId
