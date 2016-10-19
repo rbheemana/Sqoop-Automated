@@ -1,0 +1,10 @@
+group_name|app_specific|script_name|Properties
+
+#To create hive tables
+CREATE|g|run_gen.py|<template_table>.properties|service|
+
+#To run ingest which does sqoop, hive insert, validate
+INCR_INGEST_vALUES|g|run_ingest.py|incr|<table_name>|<where_col>#<type>|<lower_bound>|<upper_bound>
+INCR_INGEST|g|run_ingest.py|incr|<table_name>|<where_col>#<type>
+SYNC_INGEST|g|run_ingest.py|sync|<table_name>|<where_col>#<type>
+FULL_INGEST|g|run_ingest.py|full|<table_name>
