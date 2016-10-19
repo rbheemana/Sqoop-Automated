@@ -1,0 +1,152 @@
+<workflow-app xmlns='uri:oozie:workflow:0.5' name='wf_oozie_${env}_${app}_${table}_ingest'>
+	<credentials>
+		<credential name='hive_credentials' type='hive2'>
+			<property>
+				<name>hive2.jdbc.url</name>
+				<value>${hive2JDBC}</value>
+			</property>
+			<property>
+				<name>hive2.server.principal</name>
+				<value>${hive2Principal}</value>
+			</property>
+		</credential>
+	</credentials>
+	<start to='SqoopDB'/>
+	<!-- Step 1: Sqoop data -->
+	<action name='SqoopDB'>
+		<sqoop xmlns="uri:oozie:sqoop-action:0.3">
+			<job-tracker>${jobTracker}</job-tracker>
+			<name-node>${nameNode}</name-node>
+						<prepare>
+				<delete path='${stg_target_dir}'/>
+			</prepare>
+			<configuration>
+				<property>
+					<name>hadoop.security.credential.provider.path</name>
+					<value>${password_key_provider}</value>
+				</property>
+				<property>
+					<name>oracle.jdbc.mapDateToTimestamp</name>
+					<value>false</value>
+				</property>
+				<property>
+					<name>oozie.launcher.mapred.map.child.env</name>
+					<value>HADOOP_CREDSTORE_PASSWORD=None</value>
+				</property>
+				<!--property>
+					<name>org.apache.sqoop.credentials.loader.class</name>
+					<value>org.apache.sqoop.util.password.CredentialProviderPasswordLoader</value>
+				</property-->
+				<!--property>
+					<name>mapreduce.job.queuename</name>
+					<value>${default_queuename}</value>
+				</property-->
+			</configuration>
+			<arg>import</arg>
+		  <!--arg>-Dhadoop.security.credential.provider.path=${password_key_provider}</arg-->
+			<arg>--options-file</arg><arg>${datasource}_options_file.sqoop</arg>
+			<arg>--connect</arg><arg>${jdbc_connect}</arg>
+			<arg>--username</arg><arg>${username}</arg>
+			<arg>--password-file</arg><arg>/user/mrice/mfspw.txt</arg>
+			<!--arg>-password-alias</arg><arg>"${password_alias}"</arg-->
+			<arg>--table</arg><arg>${table}</arg>
+			<arg>--columns</arg><arg>${columns}</arg>
+			<arg>--where</arg><arg>${where}</arg>
+			<arg>--verbose</arg>
+			<arg>--m</arg><arg>${num_mappers}</arg>
+			<arg>--split-by</arg><arg>${split_by_column}</arg>
+			<arg>--fields-terminated-by</arg><arg>${fields_terminated_by}</arg>
+			<arg>--null-string</arg><arg>${null_string}</arg>
+			<arg>--null-non-string</arg><arg>${null_non_string}</arg>
+			<arg>--hive-drop-import-delims</arg>
+			<arg>--map-column-java</arg><arg>${map_column_java}</arg>
+			<!--arg>-connections-parm-file</arg><arg>${datasource}_connection.properties</arg-->
+
+			<arg>--target-dir</arg><arg>${stg_target_dir}</arg>
+			<file>${datasource}_connection.properties</file>
+			<file>${datasource}_options_file.sqoop</file>
+		</sqoop>
+		<ok to="hdfscommands"/>
+		<error to="fail"/>
+	</action>
+	<!--Step2: Step sqooped file permisions to 777 -->
+	<action name="hdfscommands">
+		<fs>
+			<chmod path='${stg_target_dir}' permissions='-rwxrwxrwx' dir-files='true'><recursive/></chmod>
+		</fs>
+		<ok to="HiveStgToFinal"/>
+		<error to="fail"/>
+	</action>
+	<!--Step3: Insert into final table using Hive -->
+	<action name="HiveStgToFinal" cred="hive_credentials">
+		<hive2 xmlns="uri:oozie:hive2-action:0.1">
+			<job-tracker>${jobTracker}</job-tracker>
+			<name-node>${nameNode}</name-node>
+			<configuration>
+				<property>
+					<name>mapreduce.job.queuename</name>
+					<value>${default_queuename}</value>
+				</property>
+			</configuration>
+			<jdbc-url>${hive2JDBC}</jdbc-url>
+			<script>${hive_query}</script>
+			<param>hv_db_stage=${hv_db_stage}</param>
+			<param>hv_db=${hv_db}</param>
+			<param>table=${table}</param>
+			<param>hv_table=${hv_table}</param>
+			<param>partition_clause=${partition_clause}</param>
+			<param>columns_without_partition=${hv_columns_without_partition}</param>
+			<param>partition_column_select=${partition_column_select}</param>
+			<param>where_column=${where_column}</param>
+			<param>partition_column=${partition_column}</param>
+			<param>hdfs_load_ts=${hdfs_load_ts}</param>
+			<param>stage_table=${stage_table}</param>
+			<param>default_queuename=${default_queuename}</param>
+		</hive2>
+		<ok to="RunValidations" />
+		<error to="email_failure" />
+	</action>
+	<!--Step 4: Run validations python script -->
+	<action name="RunValidations">
+		<shell xmlns="uri:oozie:shell-action:0.1">
+			<job-tracker>${jobTracker}</job-tracker>
+			<name-node>${nameNode}</name-node>
+			<configuration>
+				<property>
+					<name>oozie.launcher.mapred.map.child.env</name>
+					<value>HADOOP_CREDSTORE_PASSWORD=none</value>
+				</property>
+				<property>
+					<name>mapreduce.job.credentials.binary</name>
+					<value>/user/${oozie_user_name}.keytab</value>
+				</property>
+				<property>
+					<name>mapreduce.job.queuename</name>
+					<value>${default_queuename}</value>
+				</property>
+			</configuration>
+			<exec>python</exec>
+			<argument>run_validations.py</argument>
+			<env-var>PYTHON_EGG_CACHE=/tmp</env-var>
+			<env-var>HADOOP_CLASSPATH=${HADOOP_CLASSPATH}</env-var>
+			<file>run_validations.py#run_validations.py</file>
+		</shell>
+		<ok to="end"/>
+		<error to="email_failure"/>
+	</action>
+	<!--Step 5: Send Failure email -->
+	<action name="email_failure">
+		<email xmlns="uri:oozie:email-action:0.1">
+			<to>${email_list}</to>
+			<subject>OOZIE Job Failed </subject>
+			<body>There is error in the workflow please refer to the wf_oozie_${env}_${app}_${table}_ingest workflow on the oozie workflow Dashboard</body>
+		</email>
+		<ok to="fail"/>
+		<error to="fail"/>
+	</action>
+	<kill name="fail">
+		<message>Sqoop failed, error messafe[${wf:errorMessage(wf:lastErrorNode())}]</message>
+	</kill>
+	<end name='end'/>
+</workflow-app> 
+					
