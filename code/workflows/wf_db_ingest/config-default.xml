@@ -15,4 +15,16 @@
 		<name>partition_clause</name>
 		<value>   </value>
 	</property>
+	<property>
+		<name>split_by_column</name>
+		<value>1</value>
+	</property>
+	<property>
+		<name>validation_type</name>
+		<value>default</value>
+	</property>
+	<property>
+		<name>pre_validation_type</name>
+		<value>none</value>
+	</property>
 </configuration>
