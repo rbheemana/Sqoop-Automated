@@ -2,7 +2,9 @@
 
 # Purpose: accept table and aguments for run_oozie_workflow.py
 
-import sys, os, fileinput, errno, datetime, commands, re, string, envvars, time,getpass
+import sys, os, fileinput, errno, commands, re, string, envvars, time,getpass
+from datetime import datetime 
+from datetime import timedelta
 import shutil
 from optparse import OptionParser
 import subprocess
@@ -13,8 +15,8 @@ def main():
     return_code = 0
     start_line = "".join('*' for i in range(100))
     print(start_line)
-    print("run_ingest.py           -> Started    : " + datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
-    table,field,field_type,field_rdbms_format,field_hadoop_format,lower_bound,upper_bound,common_properties,app,sub_app,env,env_ver,group,ingest_type = arg_handle()
+    print("run_ingest.py           -> Started    : " + datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
+    table,field,field_type,field_rdbms_format,field_hadoop_format,lower_bound,upper_bound,common_properties,app,sub_app,env,env_ver,group,ingest_type, common_date = arg_handle()
     print "field_type=" , field_type
     
 
@@ -33,7 +35,17 @@ def main():
 
     # Build the table properties file name and path from variables run_ingest only calls wf_db_ingest workflow
     table_properties = envvars.list['lfs_app_workflows'] + '/wf_db_ingest/' + table + '.properties'
-
+    rm_ctlM = "sed -i -e 's/\r$//' "+table_properties
+    rc,status = commands.getstatusoutput(rm_ctlM)
+    print("run_ingest.py           -> removing ^M characters in file: "+rm_ctlM+" Status:"+str(rc))
+    # get time stamp to load the table
+    hdfs_load_ts = "'" + str(common_date).replace("_"," ") +"'"
+    common_date_tfmt = datetime.strptime(common_date,'%Y-%m-%d_%H:%M:%S.%f')
+    log_time = common_date_tfmt.strftime('%Y-%m-%d_%H-%M-%S')
+    log_date = common_date_tfmt.strftime('%Y-%m-%d')
+    log_folder = envvars.list['lfs_app_logs'] + "/"+log_date
+    log_file = log_folder +"/run_job-" + group + '_' + log_time  + '.log'
+    envvars.list['hdfs_load_ts'] = hdfs_load_ts
 
     #load evironment variables for app specific
     envvars.load_file(table_properties) 
@@ -46,8 +58,7 @@ def main():
     db = envvars.list['hv_db']
     table = envvars.list['hv_table']
     
-    # get time stamp to load the table
-    hdfs_load_ts = "'" + str(datetime.datetime.now()) +"'"
+
     sys.stdout.flush()
     if ingest_type == 'sync':
        sourceStats = get_stats_sqoop(table,envvars.list['where_column'])
@@ -55,6 +66,7 @@ def main():
        #print("Source Result:"+str(sourceStats))
        #print("Target Result:"+str(targetStats))
        whereClause = ""
+       whereHClause = ""
        for key in sourceStats:
           if key in targetStats:
              if sourceStats[key] != targetStats[key]:
@@ -74,11 +86,12 @@ def main():
                                         'group=' +group,
                                         'happ=' + envvars.list['happ'],
                                         'where='+whereClause,
+                                        'log_file='+log_file,
                                         'hdfs_load_ts=' + hdfs_load_ts])
        
     elif ingest_type == 'incr':
         if field is None:
-           print("run_ingest.py           -> ERROR: Incremental SQOOP cannot be performed with where column ")
+           print("run_ingest.py           -> ERROR: Incremental SQOOP cannot be performed with out where column ")
            return_code = 2
            sys.exit(return_code)
         print("run_ingest.py           -> DownloadTyp: Partial Download based on where condition ")        
@@ -95,7 +108,7 @@ def main():
                     return_code = 2
                     sys.exit(return_code)
                 else: 
-                    print("run_ingest.py           -> LowerBound: Min date is determined from Impala table") 
+                    print("run_ingest.py           -> LowerBound: Min date "+lower_bound+" is determined from Impala table")
             elif lower_bound is None and field is None:
                 print("run_ingest.py           -> Arguments error: lower_bound or field or entry in exception file is expected")
                 return_code = 2
@@ -106,19 +119,34 @@ def main():
             print("run_ingest.py           -> LowerBound : Min date is determined from jobnames.list file") 
     
         if  upper_bound is None or upper_bound == "":
-            curr_dt = str(datetime.datetime.now().date())
+            curr_dt = str(datetime.now().date())
             if field.strip().lower() == "msrmnt_prd_id":
                print "run_ingest.py           -> Upper_bound      : BDW table date used "+str(curr_dt)
                upper_bound = get_bdw_date_from_id(db, curr_dt)
+            elif field_type.lower() == "timestamp":
+               upper_bound = str(datetime.strptime(str(datetime.now()), "%Y-%m-%d %H:%M:%S.%f"))
+            elif field_type.lower() == "int":
+               upper_bound = '99999999'
+               print("run_ingest.py           -> UpperBound :  is 99999999")
             else:
                upper_bound = curr_dt
                print("run_ingest.py           -> UpperBound : Max Date is current date")
         else:
             print("run_ingest.py           -> UpperBound : Max Date source is same as Min date")
-        
+        if field_type.strip().lower() == "timestamp" or field_type.lower() == "":
+            ingest_special_args = get_ingest_special_args(envvars.list['lfs_app_config'],table)
+            if "lower_bound_modifier_days" in ingest_special_args:
+               try:
+                   val = int(ingest_special_args["lower_bound_modifier_days"].strip())
+                   print("run_ingest.py           -> LowerBound Modifier:"+str(val))
+                   lower_bound = datetime.strptime(lower_bound, "%Y-%m-%d %H:%M:%S.%f") + timedelta(days=val) 
+                   lower_bound = str(lower_bound)
+                   print("run_ingest.py           -> LowerBound : updated to "+lower_bound+" from ingest_special.properties file")
+               except ValueError:
+                   print("lower_bound_modifier is not an int! "+str(ingest_special_args["lower_bound_modifier_days"])+"!")
         if field_type.lower() == "timestamp" and envvars.list['datasource'] == "oracle":
-           lower_bound_f = "to_timestamp('"+lower_bound+"','yyyy-mm-dd')"
-           upper_bound_f = "to_timestamp('"+upper_bound+"','yyyy-mm-dd')"
+           lower_bound_f = "to_timestamp('"+lower_bound+"','YYYY-MM-DD HH24:MI:SS.FF')"
+           upper_bound_f = "to_timestamp('"+upper_bound+"','YYYY-MM-DD HH24:MI:SS.FF')"
         else:
            lower_bound_f = lower_bound
            upper_bound_f = upper_bound
@@ -126,34 +154,39 @@ def main():
                                         'app=' + app,
                                         'sub_app=' +sub_app,
                                         'group=' +group,
+                                        'log_file='+log_file,
                                         'happ=' + envvars.list['happ'] ,
                                         'min_bound=' + lower_bound_f,
                                         'max_bound=' + upper_bound_f,
                                         'hdfs_load_ts=' + hdfs_load_ts])
 
         if field_type.lower() == "int":
-            dynamic_properties = dynamic_properties + '\n ' + "where=${where_column} between ${min_bound} and ${max_bound}" 
-            dynamic_properties = dynamic_properties + '\n ' + "where_hadoop=${partition_column} between ${min_bound} and ${max_bound}" 
+            dynamic_properties = dynamic_properties + '\n ' + "where=${where_column} between ${min_bound}  and ${max_bound}"
+            dynamic_properties = dynamic_properties + '\n ' + "where_hadoop=${where_column} between ${min_bound} and ${max_bound}"
             abc_parameter = env+','+env_ver+','+app+','+sub_app+','+group+","+table+','+field+ lower_bound+"to"+upper_bound
         elif field_type == None or field_type=="" or field_type.lower() == "date" or field_type.lower() == "timestamp":
             field_rdbms_format=determine_default_field_format(field_rdbms_format) 
-            field_hadoop_format=determine_default_field_format(field_hadoop_format) 
+            field_hadoop_format=determine_default_field_format(field_hadoop_format)
+            if field_type.lower() == "timestamp":
+              field_rdbms_format = '%Y-%m-%d %H:%M:%S.%f'
+              field_hadoop_format = '%Y-%m-%d %H:%M:%S.%f'
             lower_bound_validated=validate_date_format(lower_bound,field_rdbms_format)
             upper_bound_validated=validate_date_format(upper_bound,field_rdbms_format)
-            if field_type.lower() == "timestamp" and envvars.list['datasource'] == "oracle":
-               dynamic_properties = dynamic_properties + '\n ' + "where=${where_column} between ${min_bound} and ${max_bound}" 
-            else:
-               dynamic_properties = dynamic_properties + '\n ' + "where=${where_column} between '${min_bound}' and '${max_bound}'" 
             lower_bound_hadoop=lower_bound_validated.strftime(field_hadoop_format)
             upper_bound_hadoop=upper_bound_validated.strftime(field_hadoop_format) 
             dynamic_properties = '\n'.join([dynamic_properties, 
                                             'min_bound_hadoop=' + lower_bound_hadoop,
                                             'max_bound_hadoop=' + upper_bound_hadoop])
-            dynamic_properties = dynamic_properties + '\n ' + "where_hadoop=${partition_column} between '${min_bound_hadoop}' and '${max_bound_hadoop}'" 
+            if field_type.lower() == "timestamp" and envvars.list['datasource'] == "oracle":
+               dynamic_properties = dynamic_properties + '\n ' + "where=${where_column} between ${min_bound} and ${max_bound}"
+               dynamic_properties = dynamic_properties + '\n ' + "where_hadoop=${where_column} between '${min_bound_hadoop}' and '${max_bound_hadoop}'" 
+            else:
+               dynamic_properties = dynamic_properties + '\n ' + "where=${where_column} between '${min_bound}' and '${max_bound}'"
+               dynamic_properties = dynamic_properties + '\n ' + "where_hadoop=${where_column} between '${min_bound_hadoop}' and '${max_bound_hadoop}'" 
             abc_parameter = env+','+env_ver+','+app+','+sub_app+','+group+","+table+','+field+ lower_bound_hadoop +"to"+upper_bound_hadoop
         else:
             dynamic_properties = dynamic_properties + '\n ' + "where=${where_column} between ${min_bound} and ${max_bound}" 
-            dynamic_properties = dynamic_properties + '\n ' + "where_hadoop=${partition_column} between ${min_bound} and ${max_bound}" 
+            dynamic_properties = dynamic_properties + '\n ' + "where_hadoop=${where_column} between ${min_bound} and ${max_bound}" 
             abc_parameter = env+','+env_ver+','+app+','+sub_app+','+group+","+table+','+field+ lower_bound+"to"+upper_bound
     else:
         print("run_ingest.py           -> DownloadTyp: Full Download of table ")
@@ -161,6 +194,7 @@ def main():
                                         'app=' + app,
                                         'sub_app=' +sub_app,
                                         'group=' +group,
+                                        'log_file='+log_file,
                                         'happ=' + envvars.list['happ'] ,
                                         'min_bound=' + "''",
                                         'max_bound=' + "''",
@@ -168,7 +202,10 @@ def main():
                                         'max_bound_hadoop=' + "''",
                                         'hdfs_load_ts=' + hdfs_load_ts])
         dynamic_properties = dynamic_properties + '\n ' + "where=1=1"
-        dynamic_properties = dynamic_properties + '\n ' + "where_hadoop=1=1"
+        if envvars.list['hive_query'].strip().lower() =='hv_ins_stg_fnl_audit.hql':
+           dynamic_properties = dynamic_properties + '\n ' + "where_hadoop=as_of_date="+hdfs_load_ts
+        else:
+           dynamic_properties = dynamic_properties + '\n ' + "where_hadoop=1=1"
         abc_parameter = env+','+env_ver+','+app+','+sub_app+','+group+","+table +"," 
                     
     #ABC logging parameter for oozie
@@ -189,7 +226,7 @@ def main():
         parameter_string = field +" "+lower_bound+ " "+upper_bound
     comments =  "Properties file name :" +final_properties
     abc_line = "|".join([group,"run_ingest.py","python","run_job.py",str(table),parameter_string,"RUNNING",
-                         getpass.getuser(),comments,str(datetime.datetime.today())]) 
+                         getpass.getuser(),comments,str(datetime.today())]) 
     print("**ABC_log**->"+abc_line)
     abc_parameter = env+','+env_ver+','+app+','+sub_app+','+group+",run_ingest.py"  
     sys.stdout.flush()
@@ -198,11 +235,11 @@ def main():
     if rc > return_code:
        return_code = rc
     abc_line = "|".join([group,"run_ingest.py","python","run_job.py",str(table),parameter_string,"ENDED",
-                         getpass.getuser(),"return-code:"+str(return_code),str(datetime.datetime.today())]) 
+                         getpass.getuser(),"return-code:"+str(return_code),str(datetime.today())]) 
     print("**ABC_log**->"+abc_line)
     sys.stdout.flush()                     
 
-    print("run_ingest.py           -> Ended      : " + datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
+    print("run_ingest.py           -> Ended      : " + datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
     print start_line
     print "Return-Code:" + str(return_code)
     sys.exit(return_code)
@@ -253,7 +290,9 @@ def arg_handle():
     parser.add_option("-l", "--op3",dest="lower_bound",
                       help="increment field min bound")
     parser.add_option("-u", "--op4",dest="upper_bound",
-                      help="increment field max bound") 
+                      help="increment field max bound")
+    parser.add_option("--cmmn_dt", dest="common_date",
+                  help="application name")
     parser.add_option("-a", "--app", dest="app",
                   help="application name")
     parser.add_option("-s", "--subapp", dest="sub_app",
@@ -302,11 +341,32 @@ def arg_handle():
        upper_bound = upper_bound.replace('\s',' ')
     group = options.group
     abc_line = "|".join([group,"run_ingest.py","python","run_job.py",str(table),str(options),"STARTED",
-                         getpass.getuser(),"run_ingest started..",str(datetime.datetime.today())]) 
+                         getpass.getuser(),"run_ingest started..",str(datetime.today())]) 
     print("**ABC_log**->"+abc_line)
     sys.stdout.flush()
-    return table,field_name,field_type,field_rdbms_format,field_hadoop_format,lower_bound,upper_bound,source,options.app,options.sub_app,options.env,options.env_ver,group, options.ingest_type.lower()
+    return table,field_name,field_type,field_rdbms_format,field_hadoop_format,lower_bound,upper_bound,source,options.app,options.sub_app,options.env,options.env_ver,group, options.ingest_type.lower(), options.common_date.strip()
+def get_ingest_special_args(app_config_folder,table_name):
+    print("run_ingest.py           -> Checking for special properties for table "+table_name+' in '+ app_config_folder+'/ingest_special.properties')
+    ingest_special_args = {}
+    try:
+        with open(app_config_folder+'/ingest_special.properties') as fin:
+            for line in fin:
+                args = line.split('|')
+                if  args[0].strip().lower() == table_name:
+                    print("run_ingest.py           -> Spl Prp Fnd: "+line)
+                    if  len(args) >= 3:
+                    	ingest_special_args[args[1]] = args[2]
+                    elif len(args) == 2:
+                    	ingest_special_args[args[1]] = ''
+                    else:
+                    	print("run_ingest.py           -> Spl Prp NF :No argument found for table"+table_name)
 
+    except IOError as e:
+        if  e.errno != errno.ENOENT:
+            return_code = 10
+            raise IOError("exception file reading error")
+            sys.exit(return_code)
+    return ingest_special_args
 
 def get_exception_args(app_config_folder,table_name):
     try:
@@ -425,10 +485,10 @@ def get_stats_impala(db_name, table_name,field):
     return result
 
 def get_min_bound_impala(db_name, table_name,field,field_type):
-    if field_type == "timestamp":
-       field_f = "to_date("+field+")"
-    else:
-       field_f = field
+    #if field_type == "timestamp":
+    #   field_f = "to_date("+field+")"
+    #else:
+    field_f = field
     impala_cmd = envvars.list['impalaConnect'] +' "invalidate metadata ' + db_name + '.' + table_name + '; select Max(' + field_f + ') from ' + db_name + '.' + table_name + '"'
     rc, output = commands.getstatusoutput(impala_cmd)
     outputlist = output.split('\n')
@@ -441,7 +501,7 @@ def get_min_bound_impala(db_name, table_name,field,field_type):
            max_date_str = "1900-01-01"
            return max_date_str
         if field.strip().lower() == "msrmnt_prd_id":
-           min_bound = datetime.datetime.strptime(get_bdw_id_from_date(db_name, max_date_str), "%Y-%m-%d") + datetime.timedelta(days=1) 
+           min_bound = datetime.strptime(get_bdw_id_from_date(db_name, max_date_str), "%Y-%m-%d") + timedelta(days=1) 
            print "run_ingest.py           -> Lower_bound      : BDW table date used "+str(min_bound.date())
            return get_bdw_date_from_id(db_name, str(min_bound.date()))
        
@@ -449,9 +509,13 @@ def get_min_bound_impala(db_name, table_name,field,field_type):
            validate_int(max_date_str)
            return max_date_str   
         else:   
-           validate_date(max_date_str)
-           min_bound = datetime.datetime.strptime(max_date_str, "%Y-%m-%d") + datetime.timedelta(days=1) 
-           min_bound =min_bound.date()
+           if field_type == "timestamp":
+               validate_timestamp(max_date_str)
+               min_bound = datetime.strptime(max_date_str, "%Y-%m-%d %H:%M:%S.%f") + timedelta(milliseconds=.001)
+           else:
+               validate_date(max_date_str)
+               min_bound = datetime.strptime(max_date_str, "%Y-%m-%d") + timedelta(days=1)
+               min_bound =min_bound.date()
            return str(min_bound)
     else:
         return None
@@ -466,7 +530,7 @@ def validate_int(int_text):
 
 def validate_ped(date_text):
     try:
-        datetime.datetime.strptime(date_text, '%Y%m')
+        datetime.strptime(date_text, '%Y%m')
     except ValueError:
         return_code = 10
         raise ValueError("Incorrect data format, should be YYYYMM/YYYY-MM-DD but is " + date_text)
@@ -474,13 +538,21 @@ def validate_ped(date_text):
         
 def validate_date(date_text):
     try:
-        datetime.datetime.strptime(date_text, '%Y-%m-%d')
+        datetime.strptime(date_text, '%Y-%m-%d')
     except ValueError:
         validate_date_format(date_text,"%d-%b-%Y")
 
+def validate_timestamp(date_text):
+    try:
+        datetime.strptime(date_text, '%Y-%m-%d %H:%M:%S.%f')
+    except ValueError:
+        return_code = 10
+        raise ValueError("Incorrect data format, should be YYYY-MM-DD HH:MI:SS.FF but is " + date_text)
+        sys.exit(return_code)
+
 def validate_date_format(date_text,dateFormat):
     try:
-        return datetime.datetime.strptime(date_text, dateFormat)
+        return datetime.strptime(date_text, dateFormat)
     except ValueError:
         print "validate_date_format():: ", date_text, " dateFormat=" , dateFormat
         validate_ped(date_text)
