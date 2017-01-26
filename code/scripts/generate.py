@@ -160,6 +160,7 @@ def generateScripts(template_path, app_src_path, app_wrk_path,datasource,sourceS
                print "generate.py             -> External partition specified but no expression specified ", tableInfo
                sys.exit(1)
             whereCol=tableParams[9].strip().lower() if paramsLength > 9 else partitionColumnExp
+            inQuery=tableParams[10].strip().lower() if paramsLength > 10 else ""
 
             
             seperator=""
@@ -185,15 +186,19 @@ def generateScripts(template_path, app_src_path, app_wrk_path,datasource,sourceS
                if line.strip().lower().startswith( tableName.strip().lower()+"," ):
                    tableFound="true"
                    tableColRow=line.split(",")
+                   src_tableName=tableColRow[0]
                    columnName=tableColRow[1]; columnLength=tableColRow[2] ; columnType=tableColRow[3]
                    decimalTotalDigits=tableColRow[4]; decimalFractionDigits=tableColRow[5]
                    columnId = tableColRow[6]
                    dataType = datatypes.getColumnType(datasource,columnType,columnLength,decimalTotalDigits,decimalFractionDigits)
                    #print columnName ,columnType, columnLength, " ==> dataType = ", dataType
-                   columnName=columnName.lower()
+                   #SQOOP_UPDATE
+                   #columnName=columnName.lower()
                    mapColumnType=datatypes.getMapColumnType(datasource,columnType)
                    if not mapColumnType=="":
-                      mapCol = columnName.replace("#","_").lower()
+                      #SQOOP_UPDATE
+                      #mapCol = columnName.replace("#","_").lower()
+                      mapCol = columnName.replace("#","_")
                       if mapCol[0] in "0123456789":
                          mapCol = "_" + mapCol
                       #For now it is hard coded to look for only master_loan_lease_hist table.
@@ -203,7 +208,7 @@ def generateScripts(template_path, app_src_path, app_wrk_path,datasource,sourceS
                       mapColumnJava = mapColumnJava + mapColumnSeperator + mapCol + "="+mapColumnType
                       mapColumnSeperator=","
 
-                   if partitionCol.lower() == columnName:
+                   if partitionCol.lower() == columnName.lower():
                        partitionToken = "partition ( " + partitionCol + " ) "
                        partitionColumnSelectToken = "," + columnName
                        partitionColumnToken = columnName
@@ -212,11 +217,15 @@ def generateScripts(template_path, app_src_path, app_wrk_path,datasource,sourceS
                        createPartitionColumn = partitionCol + " " + dataType
                    else:
                        if colIndex%5 == 0:
-                          columnsWithoutPartitionToken = columnsWithoutPartitionToken + "\\\n" + seperator + columnName.lower()
+                          #SQOOP_UPDATE
+                          #columnsWithoutPartitionToken = columnsWithoutPartitionToken + "\\\n" + seperator + columnName.lower()
+                          columnsWithoutPartitionToken = columnsWithoutPartitionToken + "\\\n" + seperator + columnName
                           hiveColumnsWithoutPartitionToken = hiveColumnsWithoutPartitionToken + "\\\n" + seperator + columnName.replace("#","_").lower()
                           colIndex=1
                        else:
-                          columnsWithoutPartitionToken = columnsWithoutPartitionToken + seperator + columnName.lower()
+                          #SQOOP_UPDATE
+                          #columnsWithoutPartitionToken = columnsWithoutPartitionToken + seperator + columnName.lower()
+                          columnsWithoutPartitionToken = columnsWithoutPartitionToken + seperator + columnName
                           hiveColumnsWithoutPartitionToken = hiveColumnsWithoutPartitionToken + seperator + columnName.replace("#","_").lower()
                           colIndex = colIndex + 1
 
@@ -266,11 +275,13 @@ def generateScripts(template_path, app_src_path, app_wrk_path,datasource,sourceS
                 tableJobProperties = tableJobProperties.replace("jdbcrefToken",jdbcReference.lower())
                 if database == "":
                    tableJobProperties = tableJobProperties.replace("schemaToken"," ")
-                else: 
-                   tableJobProperties = tableJobProperties.replace("schemaToken",database.lower() + "." )
-                tableJobProperties = tableJobProperties.replace("${TableName}",tableName)
+                else:
+                   #SQOOP update 
+                   #tableJobProperties = tableJobProperties.replace("schemaToken",database.lower() + "." )
+                   tableJobProperties = tableJobProperties.replace("schemaToken",database + "." )
+                tableJobProperties = tableJobProperties.replace("${TableName}",src_tableName)
                 tableJobProperties = tableJobProperties.replace("${stgTableName}",stgTableName)
-                   
+                tableJobProperties = tableJobProperties.replace("${hiveStageDBLevelToken}",stgDestDBLevel)   
                 tableJobProperties = tableJobProperties.replace("${hiveTableNameToken}",hiveTableName)
                 tableJobProperties = tableJobProperties.replace("${hiveDestDBLevelToken}",hiveDestDBLevel)
                 tableJobProperties = tableJobProperties.replace("${columnsWithoutPartitionToken}", columnsWithoutPartitionToken)
@@ -295,38 +306,47 @@ def generateScripts(template_path, app_src_path, app_wrk_path,datasource,sourceS
                    if datasource.lower() == "sqlserver":
                       tableJobProperties = tableJobProperties.replace("${splitBy}",splitBy+ " % ${num_mappers}")
                    elif datasource.lower() == "oracle":
+                      #SQOOP update
+                      #tableJobProperties = tableJobProperties.replace("${splitBy}","MOD("+splitBy+",${num_mappers})")
                       tableJobProperties = tableJobProperties.replace("${splitBy}",splitBy)
                    else:
-                      tableJobProperties = tableJobProperties.replace("${splitBy}",splitBy+ " MOD ${num_mappers}")
+                      #SQOOP update
+                      #tableJobProperties = tableJobProperties.replace("${splitBy}",splitBy+ " MOD ${num_mappers}")
+                      tableJobProperties = tableJobProperties.replace("${splitBy}",splitBy)
                 else: 
                    tableJobProperties = tableJobProperties.replace("${splitBy}",splitBy)
                 
                 tableJobProperties = tableJobProperties.replace("${mapColumnJavaToken}",mapColumnJava)
-                if partitionType.lower() == 'ext':
+                if not inQuery == "":
+                   tableJobProperties = tableJobProperties +'\nhive_query='+inQuery.strip().lower()
+                elif partitionType.lower() == 'ext':
                    tableJobProperties = tableJobProperties +'\nhive_query=hv_ins_stg_fnl_ext_partition.hql'
                 else:
                    tableJobProperties = tableJobProperties +'\nhive_query=hv_ins_stg_fnl.hql'
-                
-                print "generate.py             -> writing to " + wfPath+"/"+tableName + ".properties"
-                outfile = open(wfPath+"/"+tableName + ".properties","w")
+                if database.lower().strip() == "":
+                   TtableName = tableName
+                else:
+                   TtableName = database.lower().strip()+"."+tableName
+                print "generate.py             -> writing to " + wfPath+"/"+TtableName + ".properties"
+                outfile = open(wfPath+"/"+TtableName + ".properties","w")
                 outfile.write(tableJobProperties)
                 outfile.close()
-                subprocess.call(["chmod", "777",wfPath+"/" + tableName +".properties"])
+                subprocess.call(["chmod", "771",wfPath+"/" + TtableName +".properties"])
 
                 #stgTableName = "raw_"+tableName
                 #stgTableName = tableName
-                print "generate.py             -> writing to " + app_src_path+"/hive/"+tableName + "_create_stg.hql"
+                print "generate.py             -> writing to " + app_src_path+"/hive/"+TtableName + "_create_stg.hql"
                 #Populate staging table create script
-                outfile = open(app_src_path + "/hive/" + tableName+ "_create_stg.hql","w")
+                outfile = open(app_src_path + "/hive/" + TtableName+ "_create_stg.hql","w")
                 createStgText = createStgTemplateText
                 createStgText = createStgText.replace( "${hiveconf:stage_table}",stgTableName)
                 createStgText = createStgText.replace( "${hiveconf:createStgColumns}",createStgColumnToken) 
                 outfile.write( createStgText)
                 outfile.close()
-                subprocess.call(["chmod", "777",app_src_path+"/hive/" + tableName +"_create_stg.hql"])
+                subprocess.call(["chmod", "771",app_src_path+"/hive/" + TtableName +"_create_stg.hql"])
 
                 #populate final/parquet table create script
-                outfile = open(app_src_path + "/hive/" + tableName + "_create_parquet.hql","w")
+                outfile = open(app_src_path + "/hive/" + TtableName + "_create_parquet.hql","w")
                 createParquetText = createParquetTemplateText
                 createParquetText = createParquetText.replace("${hiveconf:table}",hiveTableName)
                 createParquetText=createParquetText.replace("${hiveconf:columnsWithoutPartition}",createColumnsToken) 
@@ -334,13 +354,13 @@ def generateScripts(template_path, app_src_path, app_wrk_path,datasource,sourceS
                 outfile.write(createParquetText)
                 outfile.close()
 
-                subprocess.call(["chmod", "777",app_src_path+"/hive/" + tableName +"_create_parquet.hql"])
+                subprocess.call(["chmod", "771",app_src_path+"/hive/" + TtableName +"_create_parquet.hql"])
 
-                tablesGenerated=tablesGenerated + tableName + "\n"
+                tablesGenerated=tablesGenerated + TtableName + "\n"
             
             continue
 
-        outFilePath = app_wrk_path + "/"+sqoopparams +".list"
+        outFilePath = app_wrk_path + "/ingest/"+sqoopparams +".list"
         print "generate.py             -> tablesGeneratedList is in location  "+ outFilePath
         if not tablesGenerated == "":
             outfile = open(outFilePath,"w")
@@ -377,7 +397,7 @@ if __name__ == "__main__":
      import envvars
      envvars.populate(options.env,options.env_ver,options.app,options.sub_app)
 
-     sqoopParamFilePath = envvars.list['lfs_app_config'] + "/"+options.sqoopparams
+     sqoopParamFilePath = envvars.list['lfs_app_config'] + "/ingest/"+options.sqoopparams
      tableName = options.tableName
      env_ver = options.env_ver
      print "generate.py             -> sqoopParamFilePath = " + sqoopParamFilePath
