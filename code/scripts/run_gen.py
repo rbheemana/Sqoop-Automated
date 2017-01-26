@@ -21,6 +21,8 @@ def arg_handle():
               help="environment name")
     parser.add_option("-v", "--env_ver", dest="env_ver",
               help="environment name")
+    parser.add_option("--cmmn_dt", dest="common_date",
+                  help="application name")
     parser.add_option("-b", "--op0", dest="config_file",
               help="environment name")
     parser.add_option("-c", "--op1", dest="key_store",
@@ -65,7 +67,7 @@ def main():
     options, args = arg_handle()
     
     envvars.populate(options.env,options.env_ver,options.app,options.sub_app)
-    config_file_path = envvars.list['lfs_app_config']+"/"+options.config_file
+    config_file_path = envvars.list['lfs_app_config']+"/ingest/"+options.config_file
     if not os.path.isfile(config_file_path):
        print "run_gen.py           -> ERROR:   config file "+config_file_path+" does not exists ***"
        sys.exit(1)
@@ -103,7 +105,7 @@ def main():
     args = " ".join([envvars.list['lfs_global_scripts'] + "/generate.py -s",
                         options.config_file,
                         "-m",
-                        envvars.list['lfs_app_config']+"/"+options.config_file+".meta",
+                        envvars.list['lfs_app_config']+"/ingest/"+options.config_file+".meta",
                         "-w",
                         envvars.list['lfs_app_workflows']+"/wf_db_ingest",
                         "-k",
@@ -143,7 +145,7 @@ def main():
                          "--app "+options.app,
                          "--subapp "+options.sub_app,
                          "--env " +options.env,
-                         "--op0 "+envvars.list['lfs_app_config']+"/"+options.config_file+".list",
+                         "--op0 "+envvars.list['lfs_app_config']+"/ingest/"+options.config_file+".list",
                          "--op1 "+envvars.list['lfs_global_config']+"/oozie_global.properties",
                          "--env_ver "+options.env_ver,
                          "--op2 "+envvars.list['lfs_app_workflows']+"/wf_db_ingest",
