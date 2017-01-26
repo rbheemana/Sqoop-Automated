@@ -115,8 +115,8 @@ def getTableNames( tableItems):
     for tableItem in tableItems:
        tableName = tableItem[0]
        tablesToSqoop = tablesToSqoop + seperator + "'"+ tableItem[0] + "'"
-       #seperator=","
-       seperator="#"
+       seperator=","
+       #seperator="#"
     return tablesToSqoop
 
 def getMetadataQuery(global_config,datasource,database,tableNames):
@@ -181,7 +181,7 @@ if __name__ == "__main__":
      sys.path.append( os.path.expanduser(common_root_path + "/code/scripts/") )
      import envvars
      envvars.populate(env,env_ver,options.app,options.sub_app)
-     sqoopParamFilePath = envvars.list['lfs_app_config']+"/"+options.sqoopparams
+     sqoopParamFilePath = envvars.list['lfs_app_config']+"/ingest/"+options.sqoopparams
      tableName = options.tableName
      print "getmetadata.py           -> sqoopParamFilePath = " + sqoopParamFilePath
      
@@ -216,7 +216,7 @@ if __name__ == "__main__":
 
      #passwordKeyProvider = envvars.list[datasource+ "_password_key_provider"]
      passwordKeyProvider = "jceks://hdfs" + get_keystore_root(options.key_store, app,db_user_id) \
-                                          + "/" + userName.upper() + ".jceks"
+                                          + "/" + userName.lower() + ".jceks"
 
      #print "getmetadata.py           -> JDBC_URL = " + jdbcUrl
      #print "getmetadata.py           -> userName = " + userName
@@ -233,6 +233,6 @@ if __name__ == "__main__":
      if len(tablesToSqoop) <= 0:
          print "getmetadata.py           -> TableName not given or Table configuration with 'TableInfo' tag could not be found in ", sqoopParamFilePath
          sys.exit(1)
-     outputFile = envvars.list['lfs_app_config']+"/"+options.sqoopparams+".meta"    
+     outputFile = envvars.list['lfs_app_config']+"/ingest/"+options.sqoopparams+".meta"    
      sqoopMetadata(envvars.list['lfs_global_config'],appName,datasource,database,jdbcUrl,integrated_security,userName,passwordAlias,passwordKeyProvider,tablesToSqoop, outputFile)
 
