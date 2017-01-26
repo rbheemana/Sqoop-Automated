@@ -1,0 +1,116 @@
+<workflow-app xmlns='uri:oozie:workflow:0.5' name='wf_oozie_${env}_${app}_${hive_query}'>
+	<credentials>
+		<credential name='hive_credentials' type='hive2'>
+			<property>
+				<name>hive2.jdbc.url</name>
+				<value>${hive2JDBC}</value>
+			</property>
+			<property>
+				<name>hive2.server.principal</name>
+				<value>${hive2Principal}</value>
+			</property>
+		</credential>
+	</credentials>
+	<start to='HiveQuery'/>
+	<!--Step1=: Execute HQL using Hive -->
+	<action name="HiveQuery" cred="hive_credentials">
+		<hive2 xmlns="uri:oozie:hive2-action:0.1">
+			<job-tracker>${jobTracker}</job-tracker>
+			<name-node>${nameNode}</name-node>
+			<configuration>
+				<property>
+					<name>mapreduce.job.queuename</name>
+					<value>${default_queuename}</value>
+				</property>
+			</configuration>
+			<jdbc-url>${hive2JDBC}</jdbc-url>
+			<script>${hive_query}</script>
+			<param>hv_db_stage=${hv_db_stage}</param>
+			<param>hv_db=${hv_db}</param>
+			<param>table=${table}</param>
+			<param>hv_table=${hv_table}</param>
+			<param>partition_clause=${partition_clause}</param>
+			<param>columns_without_partition=${hv_columns_without_partition}</param>
+			<param>where_clause=${where_clause}</param>
+			<param>partition_column=${partition_column}</param>
+			<param>stage_table=${stage_table}</param>
+		  <param>min_bound=${min_bound}</param>
+			<param>max_bound=${max_bound}</param>
+			<param>load_date=${load_date}</param>
+			<param>prev_load_date=${prev_load_date}</param>
+			<param>hdfs_location=${hdfs_location}</param>
+			<param>default_queuename=${default_queuename}</param>
+		</hive2>
+		<ok to="PyScript" />
+		<error to="email_failure" />
+	</action>
+	<!--Step 2: Run python script to refresh metadata using impala-->
+	<action name="PyScript">
+		<shell xmlns="uri:oozie:shell-action:0.1">
+			<job-tracker>${jobTracker}</job-tracker>
+			<name-node>${nameNode}</name-node>
+			<configuration>
+				<property>
+					<name>oozie.launcher.mapred.map.child.env</name>
+					<value>HADOOP_CREDSTORE_PASSWORD=none</value>
+				</property>
+				<property>
+					<name>mapreduce.job.credentials.binary</name>
+					<value>${hdfs_service_keystore_root}/${oozie_user_name}.keytab</value>
+				</property>
+				<property>
+					<name>mapreduce.job.queuename</name>
+					<value>${default_queuename}</value>
+				</property>
+			</configuration>
+			<exec>python</exec>
+			<argument>${python_script}</argument>
+			<argument>--user</argument><argument>${oozie_user_name}</argument>
+			<argument>--domain</argument><argument>${domainName}</argument>
+			<argument>--keystore</argument><argument>${hdfs_service_keystore_root}</argument>
+			<argument>--hv_table</argument><argument>${hv_table}</argument>
+			<argument>--hv_db</argument><argument>${hv_db}</argument>
+			<argument>--hv_db_stage</argument><argument>${hv_db_stage}</argument>
+			<argument>--stage_table</argument><argument>${stage_table}</argument>
+			<argument>--impalaConnect</argument><argument>${impalaConnect}</argument>
+			<env-var>PYTHON_EGG_CACHE=/tmp</env-var>
+			<env-var>HADOOP_CLASSPATH=${HADOOP_CLASSPATH}</env-var>
+			<file>${python_script}#${python_script}</file>
+		</shell>
+		<ok to="end"/>
+		<error to="email_failure"/>
+	</action>
+	<!--Step 5: Send Failure email -->
+	<action name="email_failure">
+		<email xmlns="uri:oozie:email-action:0.1">
+			<to>${email_list}</to>
+			<subject>OOZIE: ${app} Hive Query Job Failed </subject>
+			<body>
+There is error in the wf_oozie_${env}_${app}_${hive_query} workflow. 
+	APP			: ${app}
+	SUB_APP		: ${sub_app}
+	Stage Table		: ${hv_db_stage}.${stage_table}
+	Final Table		: ${hv_db}.${hv_table}
+	HQL Script		: ${hive_query}
+	Failed Node		: ${wf:lastErrorNode()}
+			
+Please refer to below for more information:
+	1. OOZIE workflow Dashboard: ${hueNode}/oozie/list_oozie_workflow/${wf:id()}
+	2. EdgeNodes Log-File: ${log_file} 
+
+Re-Run Instructions:
+	1. Log on to Edgenodes 
+	2. Trigger following Command:
+		python /cloudera_nfs1/code/scripts/run_job.py ${group} ${app} ${sub_app} 
+Note: Before rerunning make sure if re-run is absolutely necessary.
+			</body>
+		</email>
+		<ok to="fail"/>
+		<error to="fail"/>
+	</action>
+	<kill name="fail">
+		<message>Sqoop failed, error messafe[${wf:errorMessage(wf:lastErrorNode())}]</message>
+	</kill>
+	<end name='end'/>
+</workflow-app> 
+					
