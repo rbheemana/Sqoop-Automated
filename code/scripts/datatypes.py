@@ -69,6 +69,6 @@ def mapOracleType(columnType,maxLen,totalDigits,totalFraction):
    return{
        'binary_double' : 'double',
        'date'          : 'string',
-       'number'        : "decimal(" + totalDigits +"," + totalFraction +")" if maxLen == "null" else 'int',
+       'number'        : "decimal(" + totalDigits +"," + totalFraction +")" if maxLen == "null" else 'decimal(38,0)',
        'varchar2'      : 'string'
    }.get(columnType.lower(),'String')
