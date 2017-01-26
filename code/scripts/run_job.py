@@ -5,6 +5,7 @@
 
 import sys, os, commands, envvars, datetime, time ,getpass, errno
 from optparse import OptionParser
+from datetime import datetime
 import subprocess
 from subprocess import Popen, PIPE
 
@@ -41,7 +42,7 @@ def call_script(path, job, options):
              if new_line == 0:
                 print
              stdout_file.seek(ref)
-             print '\r'+'Above status doesnot change and last checked @'+str(datetime.datetime.fromtimestamp(time.time())),
+             print '\r'+'Above status doesnot change and last checked @'+str(datetime.fromtimestamp(time.time())),
              new_line = 1
           prev_line = line.strip()
     call.communicate()
@@ -97,19 +98,30 @@ def main():
     sub_app = args[2]
     jobnames = "jobnames.list"
     
-    asofdate = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d')
+    common_date =""
+    if len(args) == 4:
+       common_date = args[3].strip()
+    else:
+       common_date = str(datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d_%H:%M:%S.%f'))
+    common_date_tfmt = datetime.strptime(common_date,'%Y-%m-%d_%H:%M:%S.%f')
+    asofdate = common_date_tfmt.strftime('%Y-%m-%d')
+    log_time = common_date_tfmt.strftime('%Y-%m-%d_%H-%M-%S') 
     rerunjobnames = "jobnames_"+asofdate+".list"
     rerun = "N"
-    if len(args) == 4:
-       jobnames = args[3].strip()
-       rerunjobnames = jobnames
-       rerun = "Y"
- 
+
+#       rerunjobnames = jobnames
+#       rerun = "Y"
+
     envvars.populate(env,env_ver,app,sub_app)
         
-    log_time = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d_%H-%M-%S')
 
-    log_file = envvars.list['lfs_app_logs'] + "/run_job-" + grp_name + '_' + log_time  + '.log'
+    log_date = common_date_tfmt.strftime('%Y-%m-%d')
+    log_folder = envvars.list['lfs_app_logs'] + "/"+log_date
+    if not os.path.exists(log_folder):
+        os.makedirs(log_folder)
+        chmod_log = "chmod 777 "+log_folder
+        rc, status = commands.getstatusoutput(chmod_log)
+    log_file = log_folder +"/run_job-" + grp_name + '_' + log_time  + '.log'
     global abc_log_file, stdout_file
     abc_log_file = envvars.list['lfs_app_logs'] + "/"+grp_name+".tmp"
     failed_group_name = "@@"+ grp_name + '_' + log_time 
@@ -124,20 +136,22 @@ def main():
     global kerb, user_name 
     rc, user_name = commands.getstatusoutput("echo $USER") 
     
-    if env == 'd' or env == 't':
-       kerb = "kinit -k -t /home/"+user_name+"/"+user_name.upper()+".keytab "+user_name.upper()+envvars.list['domainName']
-    else:
-       user_name = envvars.list['srvc_acct_login_'+app+'_'+sub_app]
-       kerb = "kinit -k -t /data/bdp"+env+"/"+app+"/keytabs/"+user_name.upper()+".keytab "+user_name.upper()+envvars.list['domainName']
-    rc, out = commands.getstatusoutput(kerb)
-    print("run_job.py              -> Authenticated    : "+kerb+" RC:"+str(rc))
+    service_user_name = envvars.list['srvc_acct_login_'+app+'_'+sub_app]
+    if service_user_name is not None and service_user_name != "":
+       user_name = service_user_name
+    if not os.path.isfile(envvars.list['lfs_keystore']+user_name.lower()+".keytab "):
+       kerb = "kinit -k -t "+envvars.list['lfs_keystore']+"/"+user_name.lower()+".keytab "+user_name.lower()+envvars.list['domainName']
+       rc, out = commands.getstatusoutput(kerb)
+       print("run_job.py              -> Authenticated    : "+kerb+" RC:"+str(rc))
+    else: 
+       print("run_job.py              -> Keytab file missing, not able to authenticate. Using user default authentication")
     
     
     
     
     start_line = "".join('*' for i in range(100))
     print start_line   
-    print("run_job.py              -> Started    : " + datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
+    print("run_job.py              -> Started    : " + datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
     
     global abc_hdfs_put
     #hdfs_abc_log_file = envvars.list['hdfs_meta_raw']+"/"+envvars.list['hv_db_meta_stage']+"/abc_hadoop/load_date="+str(asofdate)+"/00000.log";
@@ -168,7 +182,7 @@ def main():
        comments = comments + "joblist file " + job_list_file
      
     abc_line = "|".join([grp_name,"run_job.py","python","CA-7 Job","",str(args),"STARTED",
-                         user_name,comments.replace(os.linesep,"---"),str(datetime.datetime.today())+"\n"]) 
+                         user_name,comments.replace(os.linesep,"---"),str(datetime.today())+"\n"]) 
     writeabc(abc_line)
     input_scripts_count = 0
     failed_scripts_count = 0
@@ -179,7 +193,7 @@ def main():
                 args = line.split('|')
                 if  args[0].strip().lower() == grp_name.lower() or grp_name.lower() == '*all':
                     options = ' --env ' + env + ' --app ' + app + ' --env_ver ' + env_ver + ' --group ' + grp_name
-                    options = options + ' --subapp ' + sub_app
+                    options = options + ' --subapp ' + sub_app + ' --cmmn_dt ' + common_date
                     if  len(args) < 3:
                         print("Error: Table name and script name not defined in config file")
                         return None, None, None, None, None, None, None
@@ -231,25 +245,27 @@ def main():
        #if input_scripts_count != failed_scripts_count:
           with open(rerun_job_list_file, 'w') as myfile:
              myfile.write(failed_scripts)
+          chmod_log = "chmod 777 "+rerun_job_list_file
+          rc, status = commands.getstatusoutput(chmod_log)
           print "run_job.py              -> Failed Script: Some scripts failed.. Please use below command to rerun.."
           print "run_job.py              -> Re-run Cmd   : "+ " ".join(["python",path+"/run_job.py",grp_name,app,sub_app])
           abc_line = "|".join([grp_name,"run_job.py","python","CA-7 Job","",str(args),"FAILED",
-                         user_name,"run_job failed, Some scripts failed.." + str(return_code),str(datetime.datetime.today())+"\n"]) 
+                         user_name,"run_job failed, Some scripts failed.." + str(return_code),str(datetime.today())+"\n"]) 
           writeabc(abc_line)
        #else:
        #   print "run_job.py              -> Failed Script: All scripts failed.. Please use below command to rerun.."
        #   print "run_job.py              -> Re-run Cmd   : "+ " ".join(["python",path+"/run_job.py",grp_name,app,sub_app,jobnames])
        #   abc_line = "|".join([grp_name,"run_job.py","python","CA-7 Job","",str(args),"FAILED",
-       #                  user_name,"run_job failed, all scripts failed.." + str(return_code),str(datetime.datetime.today())+"\n"]) 
+       #                  user_name,"run_job failed, all scripts failed.." + str(return_code),str(datetime.today())+"\n"]) 
        #   writeabc(abc_line)
     elif os.path.isfile(rerun_job_list_file):
        print "run_job.py              -> Deleting..." + str(rerun_job_list_file)
        os.remove(rerun_job_list_file)
        
     abc_line = "|".join([grp_name,"run_job.py","python","CA-7 Job","",str(args),"ENDED",
-                         user_name,"run_job ended,Return-Code:" + str(return_code),str(datetime.datetime.today())+"\n"]) 
+                         user_name,"run_job ended,Return-Code:" + str(return_code),str(datetime.today())+"\n"]) 
     writeabc(abc_line)
-    print("run_job.py              -> Ended      : Return-Code:" + str(return_code)+" " + datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
+    print("run_job.py              -> Ended      : Return-Code:" + str(return_code)+" " + datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
     print start_line
     silentremove(abc_log_file)
     sys.exit(return_code)
