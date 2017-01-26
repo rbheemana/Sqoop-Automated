@@ -1,0 +1,76 @@
+<configuration>
+	<property>
+		<name>partition_column</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>partition_column_select</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>where_column</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>where_clause</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>hdfs_location</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>min_bound</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>max_bound</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>load_date</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>prev_load_date</name>
+		<value>   </value>
+	</property>
+		<property>
+		<name>hv_table</name>
+		<value>   </value>
+	</property>
+		<property>
+		<name>hv_db</name>
+		<value>   </value>
+	</property>
+		<property>
+		<name>hv_db_stage</name>
+		<value>   </value>
+	</property>
+		<property>
+		<name>stage_table</name>
+		<value>   </value>
+	</property>
+			<property>
+		<name>table</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>columns_without_partition</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>hv_columns_without_partition</name>
+		<value>   </value>
+	</property><property>
+		<name>python_script</name>
+		<value>invalidate_metadata.py</value>
+	</property><property>
+		<name>partition_clause</name>
+		<value>   </value>
+	</property>
+	<property>
+		<name>split_by_column</name>
+		<value>1</value>
+	</property>
+</configuration>
