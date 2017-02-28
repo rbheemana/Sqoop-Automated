@@ -181,7 +181,7 @@ def main():
                                "export myDependencyJarFiles=$(find $myDependencyJarDir -name '*.jar' | sort | tr '\n' ',' | head -c -1)",
                                "export myDependencyJarFiles=$myDependencyJarFiles,$(find /opt/cloudera/parcels/CDH/jars -name 'snappy-java-*.jar')",
                                "export myDependencyJarPaths=$(find $myDependencyJarDir -name '*.jar' | sort | tr '\n' ':' | head -c -1)",
-                               'export myJVMOptions="-DmaxConnectionsPerHost=10000 -DmaxConnections=10000"',
+                               'export myJVMOptions="-DmaxConnectionsPerHost=10000 -DmaxConnections=10000 -Dspark.yarn.maxAppAttempts=1"',
                                "export SPARK_HOME=/opt/cloudera/parcels/CDH/lib/spark",
                                "export SPARK_SUBMIT_CLASSPATH=/opt/cloudera/parcels/CDH/lib/search/lib/search-crunch/commons-codec-*.jar:$SPARK_HOME/assembly/lib/*:/opt/cloudera/parcels/CDH/lib/search/lib/search-crunch/*"])
        #rc, export = commands.getstatusoutput(env_var_cmd)
@@ -226,12 +226,14 @@ def main():
                                   "--master","yarn","--deploy-mode","cluster",
                                   "--jars", dependency_jars,
                                   '--executor-memory','6G',
+                                  '--num-executors','1',
                                   '--conf','"spark.executor.extraJavaOptions='+jvm_options+'"',
                                   '--conf','"spark.driver.extraJavaOptions='+jvm_options+'"',
                                   '--class','org.apache.solr.crunch.CrunchIndexerTool',
                                   "--files",token_file_path+","+morphline_file_path+","+log4j_path,
                                   driver_jar,
                                   "-Dhadoop.tmp.dir=/tmp",
+                                  "-Dspark.yarn.maxAppAttempts=1",
                                   "-DmorphlineVariable.ZK_HOST="+envvars.list['zookeeper_ensemble'],
                                   "-DtokenFile="+token_file_name,
                                   "--morphline-file",morphline_file_name,
@@ -240,11 +242,19 @@ def main():
                                   envvars.list['hdfs_str_raw']+"/solr/"+solr_table_name])
        solr_cmd = solr_spark_cmd
        call = subprocess.Popen(solr_cmd.split('|'),stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+       prev_line = ""
+       line_count = 0
        while True:
           line = call.stdout.readline()
           if not line:
               break
-          print line.strip()
+          if prev_line[20:] != line.strip()[20:] or line_count > 1000:
+             print line.strip()
+             line_count = 0
+             prev_line = line.strip()
+          else:
+             print prev_line
+             line_count = line_count + 1
           sys.stdout.flush()
        call.communicate()
        
